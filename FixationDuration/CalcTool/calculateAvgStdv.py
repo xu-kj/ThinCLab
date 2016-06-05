@@ -99,7 +99,7 @@ if __name__ == "__main__":
 
         data["fd"] = {
             "avg": numpy.mean(fd),
-            "std": numpy.std(fd)
+            "std": numpy.std(fd, ddof = 1)
         }
 
         # ######################################################
@@ -107,28 +107,28 @@ if __name__ == "__main__":
         # ##          Avg and Stdv for Dwell Duration         ##
         # ##                                                  ##
         # ######################################################
-        fp = []
+        fd = []
         dwell = False
         for row in drows:
-            if len(fp) == 0:
+            if len(fd) == 0:
                 if row[2] == "FALSE":
                     continue
                 else:
-                    fp.append(row[1])
+                    fd.append(row[1])
                     dwell = True
             else:
                 if dwell:
                     if row[2] == "FALSE":
                         dwell = False
                     else:
-                        fp[len(fp) - 1] += row[1]
+                        fd[len(fd) - 1] += row[1]
                 elif row[2] == "TRUE":
-                    fp.append(row[1])
+                    fd.append(row[1])
                     dwell = True
 
         data["dd"] = {
-            "avg": numpy.mean(fp),
-            "std": numpy.std(fp)
+            "avg": numpy.mean(fd),
+            "std": numpy.std(fd, ddof = 1)
         }
 
         # ######################################################
@@ -138,22 +138,28 @@ if __name__ == "__main__":
         # ######################################################
         fp = []
         for row in drows:
-            group = int(row[0] / iv)
-            while group >= len(fp):
+            et = row[0] + row[1]
+            g1 = int(row[0] / iv)
+            g2 = int(et / iv)
+            while g2 >= len(fp):
                 fp.append([])
-            if row[2] == "TRUE":
-                fp[group].append(1)
-            else:
-                fp[group].append(0)
+            for i in range(g1, g2 + 1, 1):
+                if row[2] == "TRUE":
+                    fp[i].append(1)
+                else:
+                    fp[i].append(0)
         for i in range(len(fp)):
+            # print fp[i]
             # what if there's no data in the interval?
             if len(fp[i]) == 0:
                 fp[i] = 0
             else:
                 fp[i] = numpy.mean(fp[i])
+
+        # print fp
         data["fp"] = {
             "avg": numpy.mean(fp),
-            "std": numpy.std(fp)
+            "std": numpy.std(fp, ddof = 1)
         }
 
         # ######################################################

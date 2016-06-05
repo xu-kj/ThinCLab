@@ -40,11 +40,11 @@ if __name__ == "__main__":
     p_mode   = "PUMP"
 
     # Interval Values to be Tested (in seconds)
-    intervals = [5, 10, 15, 20, 25, 30, 45, 60, 75, 90, 180]
+    windows = [5, 10, 15, 20, 25, 30, 45, 60, 75, 90, 180] # length of window
 
     # Test Data Set
-    ds  = "NVP"
-    sds = [0, 0.1, 0.125, 0.25, 0.5, 1]
+    dss               = ["NVP", "BAS", "FOC"]              # name of XML files
+    threshold_factors = [0, 0.1, 0.125, 0.25, 0.5, 1]      # list of thresholds
 
     # ######################################################
     # ##                                                  ##
@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
         bas_data[seq] = {
             "avg": numpy.mean(fp),
-            "std": numpy.std(fp)
+            "std": numpy.std(fp, ddof = 1)
         }
 
     # ######################################################
@@ -120,125 +120,152 @@ if __name__ == "__main__":
     # ##              Processing Testing data             ##
     # ##                                                  ##
     # ######################################################
-    with open(ds + ".xml", "r") as file:
-        foc    = ET.fromstring(file.read())
-        focdir = {}
-        foc_pl = []
-        file.close()
+    for ds in dss:
+        with open(ds + ".xml", "r") as file:
+            foc    = ET.fromstring(file.read())
+            focdir = {}
+            foc_pl = []
+            file.close()
 
-    for ws in foc.findall(ws_tag):
-        name = ws.get(name_tag)
-        seq  = int(name[:name.find(',')])
-        focdir[seq] = {"seq": seq, "dra": {}}
-        foc_pl.append(seq)
+        for ws in foc.findall(ws_tag):
+            name = ws.get(name_tag)
+            seq  = int(name[:name.find(',')])
+            focdir[seq] = {"seq": seq, "dra": {}, "ts": {}}
+            foc_pl.append(seq)
 
-        table = ws.find(tbl_tag)
-        rows  = table.findall(row_tag)
-        (AOI, TMES, DUR) = 0, 0, 0
+            table = ws.find(tbl_tag)
+            rows  = table.findall(row_tag)
+            (AOI, TMES, DUR) = 0, 0, 0
 
-        tags = rows[0].findall(cell_tag)
-        for i in range(len(tags)):
-            data = tags[i].find(data_tag).text.lower()
-            if data == AOI_tag:
-                AOI = i
-            elif data == TMES_tag:
-                TMES = i
-            elif data == DUR_tag:
-                DUR = i
-            elif AOI != 0 and TMES != 0 and DUR != 0:
-                break
+            max_time = 0
 
-        for row in rows[1:]:
-            starttme = float(row.findall(cell_tag)[TMES].find(data_tag).text)
-            # ignoring the data in the first minute
-            if starttme < 60:
-                continue
-            aoiname = row.findall(cell_tag)[AOI].find(data_tag).text
-            if aoiname != p_mode:
-                duration = numpy.nan
-            else:
-                duration = float(row.findall(cell_tag)[DUR].find(data_tag).text)
-            focdir[seq]["dra"][starttme - 60] = duration
-        focdir[seq]["dra"] = OD(sorted(focdir[seq]["dra"].items()))
+            tags = rows[0].findall(cell_tag)
+            for i in range(len(tags)):
+                data = tags[i].find(data_tag).text.lower()
+                if data == AOI_tag:
+                    AOI = i
+                elif data == TMES_tag:
+                    TMES = i
+                elif data == DUR_tag:
+                    DUR = i
+                elif AOI != 0 and TMES != 0 and DUR != 0:
+                    break
 
-    # ######################################################
-    # ##                                                  ##
-    # ##                Calculate Hit Rate                ##
-    # ##                                                  ##
-    # ######################################################
-    pl = intersect(bas_pl, foc_pl)
-    for sd in sds:
-        output_filename = "Test on " + ds + "_Avg + " + str(sd) + " Stdv.txt"
-        output = open(output_filename, "wb")
-        output.write(' ' * 20)
-        for iv in intervals:
-            output.write("{:4.0f}  ".format(iv))
-        output.write("\r\n")
-        output.write('-' * 78 + "\r\n")
+            for row in rows[1:]:
+                starttme = float(row.findall(cell_tag)[TMES].find(data_tag).text)
+                # ignoring the data in the first minute
+                if starttme < 60:
+                    continue
+                aoiname = row.findall(cell_tag)[AOI].find(data_tag).text
+                timestamp = starttme - 60
+                if aoiname != p_mode:
+                    dur = - float(row.findall(cell_tag)[DUR].find(data_tag).text)
+                else:
+                    dur = float(row.findall(cell_tag)[DUR].find(data_tag).text)
+                focdir[seq]["dra"][timestamp] = dur
+                if timestamp > max_time:
+                    max_time = timestamp
 
-        for par in pl:
-            output.write("# Participant " + "{:2.0f}".format(par) + " |  ")
-            mark  = bas_data[par]["avg"] + bas_data[par]["std"] * sd
-            score = []
-            print "par: #" + str(par)
-
-            for iv in intervals:
-                # mark = bas_data[par][iv]["avg"] + bas_data[par][iv]["std"] * sd
-                # print iv, mark, bas_data[par][iv]["avg"], bas_data[par][iv]["std"]
-                print iv
-                fv = []
-                dwell = False
-                for t, f in focdir[par]["dra"].iteritems():
-                    st = int(t / iv)
-                    while st >= len(fv):
-                        fv.append([])
-                    if math.isnan(f):
-                        dwell = False
-                        continue
-                    et = int((t + f) / iv)
-                    while et >= len(fv):
-                        fv.append([])
-                    if len(fv[st]) == 0:
-                        dwell = False
-                    if et > st:
-                        for i in range(st + 1, et, 1):
-                            fv[i].append(iv)
-                        fv[et].append((t + f) - et * iv)
-                        if dwell:
-                            fv[st][len(fv[st]) - 1] += (st + 1) * iv - t
-                        else:
-                            fv[st].append((st + 1) * iv - t)
-                        dwell = True
+            focdir[seq]["dra"] = OD(sorted(focdir[seq]["dra"].items()))
+            for iv in windows:
+                focdir[seq]["ts"][iv] = {}
+                mt = int(max_time / iv)
+                for i in range(0, mt + 1, 1):
+                    if (i * iv + iv) > max_time:
+                        focdir[seq]["ts"][iv][i * iv] = max_time
                     else:
-                        if dwell:
-                            fv[st][len(fv[st]) - 1] += f
-                        else:
-                            fv[st].append(f)
-                            dwell = True
-                # try:
-                #     b = fv.index([])
-                # except ValueError:
-                #     pass
-                # else:
-                #     fv.remove([])
-                print fv
+                        focdir[seq]["ts"][iv][i * iv] = i * iv + iv
+                focdir[seq]["ts"][iv] = OD(sorted(focdir[seq]["ts"][iv].items()))
 
-                for i in range(len(fv)):
-                    # what if there's no data in the interval?
-                    if len(fv[i]) == 0:
-                        avg = 0
-                    else:
-                        avg = numpy.mean(fv[i])
-                    print avg, fv[i]
-                    # print fv[i]
-                    if avg > mark:
-                        fv[i] = 1
-                    else:
-                        fv[i] = 0
-                score.append(numpy.mean(fv))
-            for i in score:
-                output.write("{0:3.2f}  ".format(i))
+        # ######################################################
+        # ##                                                  ##
+        # ##                Calculate Hit Rate                ##
+        # ##                                                  ##
+        # ######################################################
+        pl = intersect(bas_pl, foc_pl)
+        for sd in threshold_factors:
+            output_filename = "Test on " + ds + "_Avg + " + str(sd) + " Stdv.txt"
+            output = open(output_filename, "wb")
+            output.write(' ' * 20)
+            for iv in windows:
+                output.write("{:4.0f}  ".format(iv))
             output.write("\r\n")
-            print ""
+            output.write('-' * 78 + "\r\n")
 
-        output.close()
+            for par in pl:
+                output.write("# Participant " + "{:2.0f}".format(par) + " |  ")
+                mark  = bas_data[par]["avg"] + bas_data[par]["std"] * sd
+                score = []
+                print "par: #" + str(par)
+
+                for iv in windows:
+                    # mark = bas_data[par][iv]["avg"] + bas_data[par][iv]["std"] * sd
+                    # print iv, mark, bas_data[par][iv]["avg"], bas_data[par][iv]["std"]
+                    print iv
+                    fv = []
+                    ts = focdir[par]["ts"][iv]
+                    for i in range(0, len(ts)):
+                        fv.append([numpy.nan])
+                    for t, f in focdir[par]["dra"].iteritems():
+                        if f < 0:
+                            et = t - f
+                        else:
+                            et = t + f
+                        cntr = 0
+                        for s, e in ts.iteritems():
+                            if t < s:
+                                if f < 0:
+                                    pass
+                                elif et < s:
+                                    break
+                                elif et < e:
+                                    if math.isnan(fv[cntr][len(fv[cntr]) - 1]):
+                                        fv[cntr][len(fv[cntr]) - 1] = et - s
+                                    else:
+                                        fv[cntr][len(fv[cntr]) - 1] += et - s
+                                else:
+                                    fv[cntr] = [iv]
+                            elif t >= e:
+                                # wait for the next group
+                                pass
+                            else:
+                                if f < 0:
+                                    if math.isnan(fv[cntr][len(fv[cntr]) - 1]):
+                                        pass
+                                    else:
+                                        fv[cntr].append(numpy.nan)
+                                else:
+                                    if et < e:
+                                        if math.isnan(fv[cntr][len(fv[cntr]) - 1]):
+                                            fv[cntr][len(fv[cntr]) - 1] = f
+                                        else:
+                                            fv[cntr][len(fv[cntr]) - 1] += f
+                                    else:
+                                        if math.isnan(fv[cntr][len(fv[cntr]) - 1]):
+                                            fv[cntr][len(fv[cntr]) - 1] = e - t
+                                        else:
+                                            fv[cntr][len(fv[cntr]) - 1] += e - t
+                            cntr += 1
+                    print fv
+
+                    for i in range(len(fv)):
+                        if len(fv[i]) == 0:
+                            avg = 0
+                        else:
+                            avg = numpy.nanmean(fv[i])
+                            if math.isnan(avg):
+                                avg = 0
+                        print avg, fv[i]
+                        # strictly larger
+                        if avg > mark_d:
+                            fv[i] = 1
+                        else:
+                            fv[i] = 0
+                    print fv
+                    score.append(numpy.mean(fv))
+                for i in score:
+                    output.write("{0:3.2f}  ".format(i))
+                output.write("\r\n")
+                print ""
+
+            output.close()
